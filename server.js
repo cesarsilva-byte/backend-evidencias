@@ -8,11 +8,13 @@ app.use(cors());
 
 const MONGO_URI = process.env.MONGO_URI;
 
+// Almacena el token en memoria (o usa process.env.HACKMETRIX_TOKEN si lo configuras)
+let HACKMETRIX_TOKEN = process.env.HACKMETRIX_TOKEN || '';
+
 mongoose.connect(MONGO_URI)
   .then(() => console.log('Conectado a MongoDB Atlas'))
   .catch(err => console.error('Error de conexión:', err));
 
-// Se agrega el campo 'applies' al esquema con valor por defecto 'true'
 const NoteSchema = new mongoose.Schema({
   evidenceGuid: { type: String, required: true, unique: true },
   note: { type: String, default: "" },
@@ -22,7 +24,56 @@ const NoteSchema = new mongoose.Schema({
 
 const Note = mongoose.model('Note', NoteSchema);
 
-// Obtener todas las notas y estados de auditoría
+// 1. Endpoint para que el Bot actualice el token automáticamente
+app.post('/api/token', (req, res) => {
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ error: "Falta el token Bearer" });
+  
+  HACKMETRIX_TOKEN = token;
+  console.log(`[${new Date().toISOString()}] Token Bearer actualizado correctamente.`);
+  res.json({ success: true, message: "Token actualizado correctamente en el servidor." });
+});
+
+// 2. Endpoint proxy para consultar evidencias en Hackmetrix desde Node.js
+app.get('/api/evidences', async (req, res) => {
+  if (!HACKMETRIX_TOKEN) {
+    return res.status(401).json({ error: "No hay un token de Hackmetrix activo en el servidor. Ejecuta la autenticación." });
+  }
+
+  try {
+    let page = 1;
+    let totalPages = 1;
+    let allEvidences = [];
+
+    do {
+      const url = `https://multiframework.hackmetrix.com/evidence/getEvidenceListWithParams?search=%22%22&frameworkGuids=%5B%5D&activityGuids=%5B%5D&totalEvidences=133&perPage=50&page=${page}`;
+      
+      const response = await fetch(url, {
+        headers: {
+          'accept': 'application/json, text/plain, */*',
+          'authorization': `Bearer ${HACKMETRIX_TOKEN}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Error en API Hackmetrix: ${response.status} ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      const evidences = result.data?.evidences || [];
+      allEvidences = allEvidences.concat(evidences);
+      totalPages = result.data?.pagination?.totalPages || 1;
+      page++;
+
+    } while (page <= totalPages);
+
+    res.json(allEvidences);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoints de Notas (MongoDB)
 app.get('/api/notes', async (req, res) => {
   try {
     const notes = await Note.find();
@@ -32,7 +83,6 @@ app.get('/api/notes', async (req, res) => {
   }
 });
 
-// Guardar o actualizar la nota y/o el check de auditoría
 app.post('/api/notes', async (req, res) => {
   const { evidenceGuid, note, applies } = req.body;
   if (!evidenceGuid) return res.status(400).json({ error: "Falta evidenceGuid" });
