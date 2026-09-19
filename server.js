@@ -103,5 +103,44 @@ app.post('/api/notes', async (req, res) => {
   }
 });
 
+app.get('/api/refresh-token-now', async (req, res) => {
+  const GITHUB_PAT = process.env.GITHUB_PAT;
+  const REPO_OWNER = 'cesarsilva-byte';
+  const REPO_NAME = 'bot-hackmetrix';
+  const WORKFLOW_ID = 'daily-auth.yml';
+
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WORKFLOW_ID}/dispatches`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${GITHUB_PAT}`,
+          'Accept': 'application/vnd.github+json',
+          'Content-Type': 'application/json',
+          'User-Agent': 'Render-Backend'
+        },
+        body: JSON.stringify({ ref: 'main' })
+      }
+    );
+
+    if (response.status === 204) {
+      return res.send(`
+        <div style="font-family: sans-serif; text-align: center; padding: 50px;">
+          <h1 style="color: #2da44e;">🚀 Bot Iniciado Exitosamente</h1>
+          <p>GitHub Actions está ejecutando el bot para renovar el token de Hackmetrix en segundo plano.</p>
+          <p><small>El proceso tardará entre 15 y 30 segundos.</small></p>
+        </div>
+      `);
+    }
+
+    const errorData = await response.text();
+    return res.status(response.status).send(`<h1>Error al iniciar el Bot</h1><pre>${errorData}</pre>`);
+
+  } catch (error) {
+    return res.status(500).send(`<h1>Error Interno</h1><p>${error.message}</p>`);
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Servidor activo en puerto ${PORT}`));
